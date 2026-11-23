@@ -694,6 +694,7 @@ let NPC_N = 19;   // NPCの数=20 − 人間の人数(ゲーム開始時に決�
 const RAID = 900, FIRE_CD = 1.5, SNIPE_CD = 3, SNIPE_MAG = 3, SNP_AMT = 3, SNP_N = 8;   // RAID=制限時間(秒)=15分 / FIRE_CD=ハンドガンのクールタイム(秒)(NPCも同じ) / スナイパー:クールタイム3秒・弾倉3発・弾はモール内にランダムに SNP_N 個(1個拾うと SNP_AMT 発)
 let yaw = 0, pitch = 0, hp = 100, kills = 0, t = 0, stepD = 0, state = 'title', running = false, locked = false, lockFail = false, mouseFire = false, fireCd = 0, recoil = 0;
 let wpn = 0, sMag = 0, sReserve = 0, scoped = false;   // wpn: 0=ハンドガン 1=スナイパー
+let ghost = false, gDead = 0, myRes = null, specI = 0;   // おじゃま虫(脱出/戦死のあと):ghost=なっている, gDead=復活までの秒, myRes=最初の結果
 let mag = 30, reserve = 60, meds = 1, lootVal = 0, reloadT = 0, raidT = RAID, exT = 0, nearLoot = null, npcs = [], bullets = [], parts = [], dirT = 0, loots = [];
 const keys = {}, dom = ren.domElement;
 const gun = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.15, 0.6), std(0x2b2d42)); gun.position.set(0.28, -0.24, -0.55); cam.add(gun);
@@ -1005,12 +1006,12 @@ function shoot() {
   $('cross').classList.add('hit'); setTimeout(() => $('cross').classList.remove('hit'), 90);
   if (hit.hp <= 0 && !hit.dead) { kills++; $('kills').textContent = '撃破 ' + kills; sfx('kill', hit.g.position.x, hit.g.position.z, hit.y); }
 }
-function switchWpn() { wpn = 1 - wpn; scoped = false; reloadT = 0; sfx('reload'); msg(wpn ? 'スナイパーに持ちかえた(右クリック長押しでスコープ)' : 'ハンドガンに持ちかえた'); gun.scale.z = wpn ? 1.8 : 1; }
+function switchWpn() { if (ghost) return; wpn = 1 - wpn; scoped = false; reloadT = 0; sfx('reload'); msg(wpn ? 'スナイパーに持ちかえた(右クリック長押しでスコープ)' : 'ハンドガンに持ちかえた'); gun.scale.z = wpn ? 1.8 : 1; }
 const elevNear = () => ELEVS.find(e => Math.hypot(pl.x - e.x, pl.z - e.z) < 2.2 && Math.abs(pl.y - H * lvOf(pl.y + 0.3)) < 0.7);
 function ride(d) { if (!elevNear()) return false; const L = lvOf(pl.y + 0.3) + d; if (L < 0 || L > NL - 1) { msg('これ以上は行けません'); return true; } pl.y = H * L; pl.vy = 0; sfx('pick'); msg('エレベーターで ' + ['1階', '2階', '3階', '屋上駐車場'][L] + ' へ'); return true; }
-function pickup() { const l = nearLoot; if (!l) return; if (l.kind === 'snp') sReserve += l.amt; else if (l.kind === 'ammo') reserve += l.amt; else if (l.kind === 'med') meds++; else lootVal += l.val; mpTaken(l); removeLoot(l); nearLoot = null; sfx('pick'); msg(l.name + ' を拾った'); }
+function pickup() { const l = nearLoot; if (!l || ghost) return; if (l.kind === 'snp') sReserve += l.amt; else if (l.kind === 'ammo') reserve += l.amt; else if (l.kind === 'med') meds++; else lootVal += l.val; mpTaken(l); removeLoot(l); nearLoot = null; sfx('pick'); msg(l.name + ' を拾った'); }
 function reload() { const sn = wpn === 1; if (reloadT > 0 || (sn ? sMag >= SNIPE_MAG || sReserve <= 0 : mag >= 30 || reserve <= 0)) return; reloadT = sn ? 2.5 : 1; sfx('reload'); msg('リロード中…'); }
-function useMed() { if (meds <= 0 || hp >= 100) return; meds--; hp = Math.min(100, hp + 45); sfx('pick'); msg('救急キットで回復'); }
+function useMed() { if (ghost || meds <= 0 || hp >= 100) return; meds--; hp = Math.min(100, hp + 45); sfx('pick'); msg('救急キットで回復'); }
 function showStock() {
   const L = plLevel(), wing = Math.max(0, wingAt(pl.x, pl.z, L)), list = shops.filter(s => s.L === L && s.wing === wing && s.T.v.length);
   $('dirp').innerHTML = '<b>' + ['西館 ', '東館 ', '北館 '][wing] + (L === NL - 1 ? '屋上' : (L + 1) + '階') + ' の在庫(Tabで閉じる)</b>' + (list.length ? list.map(s => { const k = s.stock; return k.med + k.ammo + k.val === 0 ? s.name + ':品切れ' : s.name + ':救急' + k.med + ' 弾' + k.ammo + ' お宝' + k.val; }).join('<br>') : 'この階にお店はありません');
@@ -1033,9 +1034,11 @@ function fastForward() {
   for (const a of sim) { a.rec.status = a.st === 'in' ? 'mia' : a.st; a.rec.money = a.st === 'out' ? a.money : 0; }
 }
 function endRaid(status) {
+  if (myRes) status = myRes.status;   // おじゃま虫のまま時間切れでも、結果は脱出/戦死のときのもの
+  pres({ gh: 0 });
   state = 'over'; running = false; mouseFire = false; scoped = false; $('hint').textContent = ''; $('prog').style.opacity = 0;
   if (document.exitPointerLock) document.exitPointerLock(); sfx(status === 'out' ? 'pick' : 'die');
-  if (status !== 'out') dropAll(pl.x, pl.y, pl.z, lootVal, mag + reserve, meds);   // 倒れた人は全部落とす
+  if (status !== 'out' && !myRes) dropAll(pl.x, pl.y, pl.z, lootVal, mag + reserve, meds);   // 倒れた人は全部落とす
   pres({ st: status === 'out' ? 'out' : 'dead', m: lootVal });
   fastForward(); parts[0].status = status; parts[0].money = status === 'out' ? lootVal : 0;
   const lab = { in: 'プレイ中', out: '脱出', dead: '戦死', mia: '行方不明' }, rows = parts.map((r, i) => ({ n: r.name, m: r.status === 'out' ? r.money : 0, s: lab[r.status] || r.status, me: i === 0 })).sort((a, b) => b.m - a.m), rank = rows.findIndex(r => r.me) + 1;
@@ -1049,6 +1052,7 @@ addEventListener('keydown', e => {
   keys[e.code] = true; if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Enter', 'Tab'].includes(e.code)) e.preventDefault();
   if (e.code === 'Enter' && !running) { if (!$('home').hidden) $('startBtn').click(); else $('ov').click(); }
   if (e.code === 'Tab') { const d = $('dirp'); d.style.display = d.style.display === 'block' ? 'none' : 'block'; if (d.style.display === 'block') showStock(); }
+  if (e.code === 'Space' && gDead > 0) specI++;   // 観戦中:見る相手を切りかえる
   if (running && e.code === 'KeyX') { fullOn = !fullOn; fullL = plLevel(); fc.style.display = fullOn ? 'block' : 'none'; }
   if (fullOn && /^Digit[1-4]$/.test(e.code)) fullL = +e.code[5] - 1;
   if (running) { if (e.code === 'KeyE') { if (!ride(1)) pickup(); } if (e.code === 'KeyQ') ride(-1); if (e.code === 'KeyR') reload(); if (e.code === 'KeyK') switchWpn(); if (e.code === 'KeyH') useMed(); }
@@ -1091,7 +1095,7 @@ function reset() {
     if (EXT.every(g => Math.hypot(g.x - x, g.z - z) > 30)) { Object.assign(pl, { x, y: H * L, z, vy: 0 }); break; }
   }
   yaw = rnd(0, 6.28); pitch = 0; hp = 100; kills = 0; $('kills').textContent = '撃破 0'; $('log').innerHTML = '';
-  mag = 30; reserve = 60; sMag = 0; sReserve = 0; wpn = 0; scoped = false; fireCd = 0; meds = 1; lootVal = 0; reloadT = 0; raidT = RAID; exT = 0;
+  mag = 30; reserve = 60; sMag = 0; sReserve = 0; wpn = 0; scoped = false; fireCd = 0; meds = 1; lootVal = 0; reloadT = 0; raidT = RAID; exT = 0; ghost = false; gDead = 0; myRes = null;
   const used = [];   // NPCは広い敷地全体にまんべんなく散らす
   for (let i = 0; i < NPC_N; i++) {
     for (let k = 0; k < 80; k++) {
@@ -1157,16 +1161,16 @@ function mpTaken(l) { if (!MP.g || l.id >= lootN0) return; MP.tk.push(l.id); if 
 let mpAcc = 0;
 function mpTick(dt) {
   if (!MP.g || !MP.room) return;
-  if ((mpAcc += dt) > 0.1) { mpAcc = 0; pres({ st: 'play', g: MP.g, x: r2(pl.x), y: r2(pl.y), z: r2(pl.z), r: r2(yaw), hp: Math.round(hp), m: lootVal }); }
+  if ((mpAcc += dt) > 0.1) { mpAcc = 0; pres({ st: myRes ? (myRes.status === 'out' ? 'out' : 'dead') : 'play', gh: ghost && gDead <= 0 ? 1 : 0, g: MP.g, x: r2(pl.x), y: r2(pl.y), z: r2(pl.z), r: r2(yaw), hp: Math.round(hp), m: lootVal }); }
   const ps = mpPeers(), me = ps.find(p => p.isMe && p.sameTab), seen = new Set();
   for (const p of ps) {
     const v = p.presence; if (p.isMe || v.g !== MP.g) continue; seen.add(p.peer);
     let a = MP.rem.get(p.peer); if (!a) { a = mkAvatar(p.peer); a.g.position.set(+v.x || 0, +v.y || 0, +v.z || 0); MP.rem.set(p.peer, a); }
     const L = MP.last.get(p.peer) || {}; MP.last.set(p.peer, L);
-    a.g.visible = v.st === 'play'; a.tg.set(+v.x || 0, +v.y || 0, +v.z || 0); a.yaw = +v.r || 0;
+    a.g.visible = v.st === 'play' || v.gh === 1; a.tg.set(+v.x || 0, +v.y || 0, +v.z || 0); a.yaw = +v.r || 0;
     const part = parts.find(r => r.peer === p.peer); if (part) { part.money = +v.m || 0; part.status = v.st === 'out' ? 'out' : v.st === 'dead' ? 'dead' : 'in'; }
     if (v.sh && v.sh.n !== L.sh && Array.isArray(v.sh.a) && Array.isArray(v.sh.b)) { L.sh = v.sh.n; addBullet(new V3(...v.sh.a), new V3(...v.sh.b), 220, 'p'); sfx('eshot', v.sh.a[0], v.sh.a[2], v.sh.a[1]); }
-    if (v.ht && me && v.ht.to === me.peer && v.ht.n !== L.ht && hp > 0) { L.ht = v.ht.n; hp -= Math.min(100, +v.ht.d || 0); sfx('hurt'); showDir(+v.x || 0, +v.z || 0, false); $('dmg').style.opacity = 1; setTimeout(() => $('dmg').style.opacity = 0, 120); }   // 相手の弾が当たった
+    if (v.ht && me && v.ht.to === me.peer && v.ht.n !== L.ht && hp > 0 && gDead <= 0) { L.ht = v.ht.n; hp -= Math.min(100, +v.ht.d || 0); sfx('hurt'); showDir(+v.x || 0, +v.z || 0, false); $('dmg').style.opacity = 1; setTimeout(() => $('dmg').style.opacity = 0, 120); }   // 相手の弾が当たった
     if (Array.isArray(v.tk) && v.tk !== L.tk) { L.tk = v.tk; for (const id of v.tk) { const l = loots.find(x => x.id === id && x.id < lootN0); l && removeLoot(l); } }   // 相手が拾った物は自分の画面からも消す
   }
   for (const [k, a] of MP.rem) {
@@ -1193,6 +1197,22 @@ $('startBtn').onclick = () => {
   }, 250);
 };
 
+// ===== 18c. おじゃま虫(脱出・戦死のあと、時間まで他の人をじゃまする)=====
+function rndSpawn() { for (let k = 0; k < 400; k++) { const L = Math.floor(Math.random() * 3), [x, z] = randCell(L, true); if (EXT.every(g => Math.hypot(g.x - x, g.z - z) > 30)) { Object.assign(pl, { x, y: H * L, z, vy: 0 }); break; } } }
+function goGhost(status) {
+  myRes = { status }; if (status === 'dead') { dropAll(pl.x, pl.y, pl.z, lootVal, mag + reserve, meds); lootVal = 0; }   // 持ち物は落とす(脱出した人はお金を持ったまま)
+  sfx(status === 'out' ? 'pick' : 'die'); ghost = true; exT = 0; hp = 100; mag = 30; wpn = 0; meds = 0; scoped = false; reloadT = 0; rndSpawn();
+  msg((status === 'out' ? '脱出成功!' : '戦死…') + ' おじゃま虫になった:時間まで妨害しよう(拾えない・走れない・ハンドガンのみ/弾∞)');
+}
+function ghostDown() { gDead = 60; specI = Math.floor(Math.random() * 9); sfx('die'); mouseFire = false; scoped = false; pl.x = pl.z = 9999; msg('やられた… 1分後に復活 / それまで誰かの画面を観戦'); }
+function ghostBack() { rndSpawn(); hp = 100; msg('復活!'); }
+function spectate() {   // 生きているNPCや人間の視点を借りて見せる
+  const L = [...npcs.map(e => ({ x: e.g.position.x, y: e.y, z: e.g.position.z, r: e.g.rotation.y + Math.PI })), ...mpAv().map(a => ({ x: a.g.position.x, y: a.g.position.y, z: a.g.position.z, r: a.yaw }))];
+  if (L.length) { const t = L[specI % L.length]; cam.position.set(t.x, t.y + 1.7, t.z); cam.rotation.set(0, t.r, 0); pl.y = t.y; pl.vy = 0; }
+  gun.visible = false; scoped = false; setS('scope', 'display', 'none'); setS('cross', 'display', 'none');
+  setT('hint', '観戦中… 復活まであと' + Math.ceil(gDead) + '秒(Spaceで見る人を切りかえ)');
+}
+
 // ===== 19. 毎フレームの更新 =====
 function update(dt) {
   t += dt; fireCd -= dt; dirT -= dt; routeBudget = 2;
@@ -1200,14 +1220,16 @@ function update(dt) {
   raidT -= dt; setT('timer', Math.floor(Math.max(0, raidT) / 60) + ':' + String(Math.floor(Math.max(0, raidT) % 60)).padStart(2, '0'));
   let near = null, nd = 2.6;
   for (const l of loots) { const dx = l.x - pl.x, dz = l.z - pl.z, far = Math.abs(dx) > 70 || Math.abs(dz) > 70; if (l.m.visible === far) l.m.visible = !far; if (Math.abs(dx) > 30 || Math.abs(dz) > 30) continue; l.m.rotation.y += dt * 2; l.m.position.y = l.y + Math.sin(t * 3 + l.x) * 0.06; const d = Math.hypot(dx, dz); if (d < nd && l.y - pl.y > -0.6 && l.y - pl.y < 2.4) { nd = d; near = l; } }
-  nearLoot = near; setT('hint', elevNear() ? 'エレベーター  E:上の階へ  Q:下の階へ' : near ? 'E:拾う  ' + near.name : '');
-  if (EXT.some(z => Math.hypot(pl.x - z.x, pl.z - z.z) < 3 && Math.abs(pl.y - H * z.L) < 2.5)) { exT += dt; setS('prog', 'opacity', 1); $('prog').firstChild.style.width = Math.min(100, exT / 6 * 100) + '%'; setT('hint', '脱出中… 動かずに待て'); if (exT >= 6) return endRaid('out'); } else { exT = 0; setS('prog', 'opacity', 0); }
+  nearLoot = ghost ? null : near; setT('hint', elevNear() ? 'エレベーター  E:上の階へ  Q:下の階へ' : nearLoot ? 'E:拾う  ' + near.name : '');
+  if (!ghost && EXT.some(z => Math.hypot(pl.x - z.x, pl.z - z.z) < 3 && Math.abs(pl.y - H * z.L) < 2.5)) { exT += dt; setS('prog', 'opacity', 1); $('prog').firstChild.style.width = Math.min(100, exT / 6 * 100) + '%'; setT('hint', '脱出中… 動かずに待て'); if (exT >= 6) return goGhost('out'); } else { exT = 0; setS('prog', 'opacity', 0); }
   if (raidT <= 0) return endRaid('mia');
+  if (gDead > 0) { gDead -= dt; spectate(); if (gDead <= 0) ghostBack(); } else {
+  if (ghost) { wpn = 0; mag = 30; reserve = 60; reloadT = 0; scoped = false; }   // おじゃま虫:ハンドガンのみ・弾は無限(クールタイムあり)
   let mx = ((keys.KeyD || keys.ArrowRight) ? 1 : 0) - ((keys.KeyA || keys.ArrowLeft) ? 1 : 0), mz = ((keys.KeyS || keys.ArrowDown) ? 1 : 0) - ((keys.KeyW || keys.ArrowUp) ? 1 : 0);
   if (mx || mz) {
-    const l = Math.hypot(mx, mz), sp = (keys.ShiftLeft ? 8 : 5) * dt, s = Math.sin(yaw), c = Math.cos(yaw);
+    const l = Math.hypot(mx, mz), dash = keys.ShiftLeft && !ghost, sp = (dash ? 8 : 5) * dt, s = Math.sin(yaw), c = Math.cos(yaw);
     mx /= l; mz /= l; pl.x += (mx * c + mz * s) * sp; pl.z += (-mx * s + mz * c) * sp;
-    if (pl.vy === 0 && (stepD += sp) > (keys.ShiftLeft ? 3 : 2.2)) { stepD = 0; sfx('pstep'); sound(pl.x, pl.y, pl.z, keys.ShiftLeft ? 16 : 7, null); }
+    if (pl.vy === 0 && (stepD += sp) > (dash ? 3 : 2.2)) { stepD = 0; sfx('pstep'); sound(pl.x, pl.y, pl.z, dash ? 16 : 7, null); }
   }
   pl.x = Math.max(-WX + 1, Math.min(WX - 1, pl.x)); pl.z = Math.max(-WZ + 1, Math.min(WZ - 1, pl.z));
   { const cv = conv(pl.x, pl.z, pl.y); if (cv && pl.vy === 0) { pl.x += cv[0] * dt; pl.z += cv[1] * dt; } }
@@ -1220,7 +1242,8 @@ function update(dt) {
   sun.position.set(pl.x + 30, pl.y + 60, pl.z + 20); sun.target.position.set(pl.x, pl.y, pl.z);
   if ((mouseFire || keys.KeyF || keys.Enter || (scoped && keys.Space)) && fireCd <= 0) { shoot(); if (fireCd <= 0) fireCd = 0.12; }   // 実際に撃てたときは shoot() の中でクールタイム(ハンドガン1.5秒/スナイパー3秒)が入る
   recoil *= 0.85; gun.position.z = (wpn ? -0.8 : -0.55) + recoil; gun.visible = !scoped;
-  { const fv = scoped ? 16 : 75; if (cam.fov !== fv) { cam.fov = fv; cam.updateProjectionMatrix(); } setS('scope', 'display', scoped ? 'block' : 'none'); setS('cross', 'display', scoped ? 'none' : 'block'); }   // スコープ:視野を75°→16°にしてズーム
+  { const fv = scoped ? 16 : 75; if (cam.fov !== fv) { cam.fov = fv; cam.updateProjectionMatrix(); } setS('scope', 'display', scoped ? 'block' : 'none'); setS('cross', 'display', scoped ? 'none' : 'block'); }
+  }
   npcs.forEach(e => { e.fcd -= dt; updateNPC(e, dt); }); updateBullets(dt); mpTick(dt);
   npcs = npcs.filter(e => {   // 倒されたNPC:持ち物(お金・弾・救急キット)をすべて落とす
     if (e.hp <= 0 && !e.left) { e.dead = true; dropNPC(e); e.rec.status = 'dead'; logEv(e.rec.name + ' が戦死'); dropAll(e.g.position.x, e.y, e.g.position.z, e.money, e.ammo, e.meds); }
@@ -1229,7 +1252,8 @@ function update(dt) {
   setS('hp', 'width', Math.max(0, hp) + '%');
   setT('items', (wpn ? 'スナイパー ' + sMag + ' / ' + sReserve : '弾 ' + mag + ' / ' + reserve) + (reloadT > 0 ? '(リロード中)' : fireCd > 0 ? '(次弾まで ' + fireCd.toFixed(1) + '秒)' : '') + '   救急 ' + meds + '   ¥' + lootVal.toLocaleString());
   if ($('dirp').style.display === 'block' && dirT <= 0) { showStock(); dirT = 0.5; }
-  if (hp <= 0) endRaid('dead');
+  if (ghost) setT('items', 'おじゃま虫(弾∞)' + (fireCd > 0 && gDead <= 0 ? ' 次弾まで ' + fireCd.toFixed(1) + '秒' : '') + (gDead > 0 ? '  復活まで ' + Math.ceil(gDead) + '秒' : ''));
+  if (hp <= 0 && gDead <= 0) { if (myRes) ghostDown(); else goGhost('dead'); }
 }
 
 // ===== 20. ゲームループ =====
