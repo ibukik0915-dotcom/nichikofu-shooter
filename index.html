@@ -667,6 +667,24 @@ function tone(dest, f0, f1, dur, vol, type) {
   const o = AC.createOscillator(), g = AC.createGain(), n = AC.currentTime; o.type = type || 'sine'; o.frequency.setValueAtTime(f0, n); o.frequency.exponentialRampToValueAtTime(f1, n + dur);
   g.gain.setValueAtTime(vol, n); g.gain.exponentialRampToValueAtTime(0.001, n + dur); o.connect(g); g.connect(dest); o.start(n); o.stop(n + dur + 0.02);
 }
+// 緊張感のあるBGM:うなる低音+心臓のような鼓動(時間が減るほど速く)+ときどき不協和音
+let bgm = null;
+function startBgm() {
+  initAudio(); if (bgm) return;
+  const G = AC.createGain(), o1 = AC.createOscillator(), o2 = AC.createOscillator(), fl = AC.createBiquadFilter(), lfo = AC.createOscillator(), lg = AC.createGain();
+  G.gain.value = 0; G.gain.linearRampToValueAtTime(0.18, AC.currentTime + 3); G.connect(AM);
+  o1.type = o2.type = 'sawtooth'; o1.frequency.value = 55; o2.frequency.value = 58.3; fl.type = 'lowpass'; fl.frequency.value = 220; lfo.frequency.value = 0.12; lg.gain.value = 110;
+  lfo.connect(lg); lg.connect(fl.frequency); o1.connect(fl); o2.connect(fl); fl.connect(G); o1.start(); o2.start(); lfo.start();
+  const thump = (at, v) => { const o = AC.createOscillator(), g = AC.createGain(); o.frequency.setValueAtTime(75, at); o.frequency.exponentialRampToValueAtTime(38, at + 0.2); g.gain.setValueAtTime(v, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.22); o.connect(g); g.connect(G); o.start(at); o.stop(at + 0.25); };
+  const sting = (at, f) => { const o = AC.createOscillator(), g = AC.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(f, at); o.frequency.linearRampToValueAtTime(f * 0.985, at + 1.6); g.gain.setValueAtTime(0.0001, at); g.gain.linearRampToValueAtTime(0.16, at + 0.4); g.gain.exponentialRampToValueAtTime(0.001, at + 1.7); o.connect(g); g.connect(G); o.start(at); o.stop(at + 1.8); };
+  let next = AC.currentTime + 0.5, beat = 0;
+  const iv = setInterval(() => {
+    const urg = 1 - Math.max(0, raidT) / RAID, step = 60 / (66 + urg * 54);
+    while (next < AC.currentTime + 0.3) { thump(next, 1); thump(next + 0.2, 0.55); if (++beat % 4 === 0 && Math.random() < 0.45 + urg * 0.4) { const b = [880, 932, 1245, 1318][Math.floor(Math.random() * 4)]; sting(next, b); sting(next, b * 1.0595); } next += step; }
+  }, 100);
+  bgm = { G, o1, o2, lfo, iv };
+}
+function stopBgm() { if (!bgm) return; const b = bgm; bgm = null; clearInterval(b.iv); b.G.gain.cancelScheduledValues(AC.currentTime); b.G.gain.linearRampToValueAtTime(0, AC.currentTime + 1); setTimeout(() => { try { b.o1.stop(); b.o2.stop(); b.lfo.stop(); } catch (e) {} }, 1200); }
 function sfx(k, x, z, y) {
   if (!AC) return;
   let v = 1, pan = 0;
@@ -675,8 +693,8 @@ function sfx(k, x, z, y) {
   if (k === 'shot') { noise(g, 0.16, 3200, 0.8); tone(g, 170, 45, 0.14, 0.9); }
   else if (k === 'snipe') { noise(g, 0.4, 900, 1); tone(g, 110, 28, 0.4, 1, 'sawtooth'); }
   else if (k === 'eshot') { noise(g, 0.22, 1800, 1); tone(g, 130, 40, 0.2, 1); }
-  else if (k === 'step') noise(g, 0.07, 600, 0.55);
-  else if (k === 'pstep') noise(g, 0.05, 500, 0.2);
+  else if (k === 'step') { noise(g, 0.09, 700, 0.9); tone(g, 120, 55, 0.09, 0.6); }
+  else if (k === 'pstep') { noise(g, 0.07, 600, 0.35); tone(g, 110, 55, 0.08, 0.3); }
   else if (k === 'hit') tone(g, 1500, 900, 0.07, 0.3);
   else if (k === 'kill') { tone(g, 700, 250, 0.25, 0.4, 'triangle'); noise(g, 0.12, 900, 0.3); }
   else if (k === 'hurt') { tone(g, 240, 80, 0.3, 0.5, 'sawtooth'); noise(g, 0.12, 700, 0.5); }
@@ -695,6 +713,7 @@ const RAID = 900, FIRE_CD = 1.5, SNIPE_CD = 3, SNIPE_MAG = 3, SNP_AMT = 3, SNP_N
 let yaw = 0, pitch = 0, hp = 100, kills = 0, t = 0, stepD = 0, state = 'title', running = false, locked = false, lockFail = false, mouseFire = false, fireCd = 0, recoil = 0;
 let wpn = 0, sMag = 0, sReserve = 0, scoped = false;   // wpn: 0=ハンドガン 1=スナイパー
 let ghost = false, gDead = 0, myRes = null, specI = 0;   // おじゃま虫(脱出/戦死のあと):ghost=なっている, gDead=復活までの秒, myRes=最初の結果
+let bosses = [];   // 徘徊する敵キャラ(倒すと大金)
 let mag = 30, reserve = 60, meds = 1, lootVal = 0, reloadT = 0, raidT = RAID, exT = 0, nearLoot = null, npcs = [], bullets = [], parts = [], dirT = 0, loots = [];
 const keys = {}, dom = ren.domElement;
 const gun = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.15, 0.6), std(0x2b2d42)); gun.position.set(0.28, -0.24, -0.55); cam.add(gun);
@@ -794,7 +813,8 @@ function makeNPC(name, x, y, z) {
   const rec = { name, money: 0, status: 'in' };
   const e = { g, head, fl, lL, lR, aL, aR, y, L: lvOf(y), hp: 40, cd: 1, fcd: 0, scan: Math.random(), dec: Math.random() * 2, tgt: null, sd: 1, step: 0, ph: 0, flash: 0, wait: 0, heal: 0, stuck: 0, exitT: 0,
     eng: 'none', engT: 99, foe: null, k: 1, fx: 0, fy: 0, fz: 0, nVis: 0, fear: 1.3, bold: rnd(0.6, 1.6), sk: rnd(0.8, 1.5), react: 0, desp: 0, burst: 0, hurtT: 0, lastBy: null, fleeT: 0, fleeRe: 0, quiet: false, noise: null, hunt: null,   // 性格=bold(度胸)・sk(射撃の下手さ)
-    path: null, pi: 0, goalLoot: null, mode: 'loot', run: Math.random() < 0.5, meds: Math.random() < 0.4 ? 1 : 0, ammo: Math.floor(rnd(30, 90)), money: 0, rec, cap: rnd(150000, 450000), gate: null };
+    path: null, pi: 0, goalLoot: null, mode: 'loot', run: Math.random() < 0.85, meds: Math.random() < 0.4 ? 1 : 0, ammo: Math.floor(rnd(30, 90)), money: 0, rec, cap: rnd(300000, 800000), gate: null };
+  e.mk = new THREE.Mesh(new THREE.OctahedronGeometry(0.3), new THREE.MeshBasicMaterial({ color: 0xffe14d, depthTest: false, transparent: true })); e.mk.renderOrder = 999; e.mk.position.y = 2.6; e.mk.visible = false; g.add(e.mk);   // おじゃま虫にだけ見える目印
   npcs.push(e); parts.push(rec); return e;
 }
 function dropNPC(e) { scene.remove(e.g); if (e.head) { e.head.material.map.dispose(); e.head.material.dispose(); e.head = null; } }   // 画像のメモリも片づける
@@ -830,7 +850,7 @@ function route(e, tx, tz, tL) {
 }
 function npcPick(e, l) {
   if (l.kind === 'med') e.meds++; else if (l.kind === 'ammo') e.ammo += l.amt; else { e.money += l.val; e.rec.money = e.money; }
-  removeLoot(l); sfx('pick', e.g.position.x, e.g.position.z, e.y);
+  removeLoot(l);   // 拾う音は鳴らさない(他の人に聞こえないように)
 }
 function goExit(e) { const p = e.g.position; e.mode = 'exit'; e.run = true; e.gate = EXT.slice().sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0]; e.goalLoot = null; e.path = null; e.dec = 0; }
 const turn = (a, b, m) => { let d = b - a; d = Math.atan2(Math.sin(d), Math.cos(d)); return a + Math.max(-m, Math.min(m, d)); };
@@ -907,7 +927,8 @@ function reactNoise(e, n) {   // 物音への反応。返り値 1=行動を決�
   const r = fleeTo(e, n.x, n.z, H * n.L); if (r === -1) return -1; if (r === 1) { e.run = false; e.dec = 1.5; return 1; } return 0;   // そっと離れる
 }
 function decide(e) {
-  e.dec = 0.6 + Math.random() * 0.8; const p = e.g.position, el = RAID - raidT; e.L = lvOf(e.y);
+  e.dec = 0.3 + Math.random() * 0.4;   // 考え直す間隔を短く=がっつく
+  const p = e.g.position, el = RAID - raidT; e.L = lvOf(e.y);
   const nz = e.noise;
   if (nz && !nz.seen) { const r = reactNoise(e, nz); if (r === -1) { e.dec = 0.05; return; } nz.seen = true; if (r) return; }
   if (e.hunt) {   // 銃声のしたほうへ、歩いて(足音を立てずに)近づく
@@ -916,14 +937,14 @@ function decide(e) {
   }
   if (e.goalLoot) {
     const l = e.goalLoot; e.goalLoot = null;
-    if (loots.includes(l) && Math.hypot(l.x - p.x, l.z - p.z) < 2.8 && Math.abs(l.y - p.y - 1) < 2.6) { npcPick(e, l); e.wait = 0.6 + Math.random() * 0.6; return; }
+    if (loots.includes(l) && Math.hypot(l.x - p.x, l.z - p.z) < 2.8 && Math.abs(l.y - p.y - 1) < 2.6) { npcPick(e, l); e.wait = 0.1 + Math.random() * 0.2; return; }
   }
-  if (e.mode !== 'exit' && (e.money >= e.cap || Math.random() < 0.003 + e.money / 8e6 + (e.hp < 25 ? 0.04 : 0) + el / RAID * 0.01)) goExit(e);   // いつでも脱出を決められる
+  if (e.mode !== 'exit' && (e.money >= e.cap || Math.random() < 0.0012 + e.money / 1.6e7 + (e.hp < 25 ? 0.04 : 0) + el / RAID * 0.006)) goExit(e);   // いつでも脱出を決められる
   if (e.mode === 'exit') { const r = route(e, e.gate.x, e.gate.z, e.gate.L); if (r === -1) e.dec = 0.05; else if (!r) e.dec = 2; return; }
   let best = null, bs = 1e9;
-  for (const l of loots) { if (l.kind === 'snp') continue; if (l.kind === 'ammo' && e.ammo > 15 && Math.random() < 0.5) continue; const s = Math.hypot(l.x - p.x, l.z - p.z) + 25 * Math.abs(lvOf(l.y) - e.L) + Math.random() * 12 - (l.kind === 'ammo' && e.ammo < 15 ? 40 : 0) - (l.kind === 'val' || l.kind === 'bag' ? 20 : 0) - (l.kind === 'med' && e.meds === 0 ? 15 : 0); if (s < bs) { bs = s; best = l; } }
-  if (best) { const r = route(e, best.x, best.z, lvOf(best.y)); if (r === -1) { e.dec = 0.05; return; } if (r) { e.goalLoot = best; e.run = Math.random() < 0.5; return; } }
-  const [x, z] = randCell(e.L); if (route(e, x, z, e.L) === -1) e.dec = 0.05;
+  for (const l of loots) { if (l.kind === 'snp') continue; if (l.kind === 'ammo' && e.ammo > 15 && Math.random() < 0.85) continue; const s = Math.hypot(l.x - p.x, l.z - p.z) + 25 * Math.abs(lvOf(l.y) - e.L) + Math.random() * 6 - (l.kind === 'ammo' && e.ammo < 15 ? 40 : 0) - (l.kind === 'val' || l.kind === 'bag' ? 45 : 0) - (l.kind === 'med' && e.meds === 0 ? 15 : 0); if (s < bs) { bs = s; best = l; } }
+  if (best) { const r = route(e, best.x, best.z, lvOf(best.y)); if (r === -1) { e.dec = 0.05; return; } if (r) { e.goalLoot = best; e.run = Math.random() < 0.9; return; } }
+  e.run = Math.random() < 0.6; const [x, z] = randCell(e.L); if (route(e, x, z, e.L) === -1) e.dec = 0.05;
 }
 function leave(e) { e.rec.status = 'out'; e.rec.money = e.money; e.hp = -999; e.left = true; dropNPC(e); logEv(e.rec.name + ' が脱出(¥' + e.money.toLocaleString() + ')'); }
 function fire(e, tg, q, spread) {   // 1発撃つ(狙いのブレは距離と射撃のうまさで決まる)
@@ -982,7 +1003,7 @@ function updateNPC(e, dt) {
   if ((e.flash -= dt) <= 0) e.fl.visible = false;
   e.L = lvOf(e.y);
   if (e.mode === 'exit' && e.gate && e.gate.L === e.L && Math.hypot(p.x - e.gate.x, p.z - e.gate.z) < 3) { if ((e.exitT += dt) > 4) { leave(e); return; } } else e.exitT = 0;
-  if ((e.step += sp * dt) > (sp > 3 ? 3 : 2.2)) { e.step = 0; if (sp > 3) sound(p.x, e.y, p.z, 9, e); if (Math.hypot(p.x - pl.x, p.z - pl.z) < 40) sfx('step', p.x, p.z, e.y); }
+  if ((e.step += sp * dt) > (sp > 3 ? 3 : 2.2)) { e.step = 0; if (sp > 3) sound(p.x, e.y, p.z, 9, e); if (Math.hypot(p.x - pl.x, p.z - pl.z) < 45) sfx('step', p.x, p.z, e.y); }
   e.g.visible = Math.abs(p.x - pl.x) + Math.abs(p.z - pl.z) < 130; if (!e.g.visible) return;   // 遠くのNPCは描かない・手足も動かさない(軽量化)
   e.ph += sp * dt * 3.2; const sw = sp ? Math.sin(e.ph) * (sp > 3 ? 1 : 0.7) : 0;
   e.lL.rotation.x = sw; e.lR.rotation.x = -sw; e.aL.rotation.x = -sw * 0.8;
@@ -994,7 +1015,7 @@ function shoot() {
   const sn = wpn === 1; if (reloadT > 0) return; if ((sn ? sMag : mag) <= 0) { sfx('click'); reload(); return; }
   if (sn) sMag--; else mag--; fireCd = sn ? SNIPE_CD : FIRE_CD; recoil = sn ? 0.22 : 0.08; sfx(sn ? 'snipe' : 'shot'); sound(pl.x, pl.y, pl.z, sn ? 90 : 55, null, 'shot');
   cam.updateMatrixWorld(); const o = cam.position.clone(), d = cam.getWorldDirection(new V3()), far = sn ? 190 : 150, tw = rayWall(o.x, o.y, o.z, d.x, d.y, d.z, far);
-  let hit = null, ht = tw, head = false; const tgts = npcs.concat(mpAv());
+  let hit = null, ht = tw, head = false; const tgts = npcs.concat(bosses, mpAv());
   for (let s = 0.4; s < tw && !hit; s += 0.25) {
     const x = o.x + d.x * s, y = o.y + d.y * s, z = o.z + d.z * s;
     for (const e of tgts) { const dx = x - e.g.position.x, dz = z - e.g.position.z, dh = Math.hypot(dx, dz); if (dh > 0.6) continue; if (Math.hypot(dh, y - (e.y + 1.7)) < 0.25) { hit = e; head = true; ht = s; break; } if (dh < 0.45 && y > e.y && y < e.y + 1.55) { hit = e; ht = s; break; } }
@@ -1034,6 +1055,7 @@ function fastForward() {
   for (const a of sim) { a.rec.status = a.st === 'in' ? 'mia' : a.st; a.rec.money = a.st === 'out' ? a.money : 0; }
 }
 function endRaid(status) {
+  stopBgm();
   if (myRes) status = myRes.status;   // おじゃま虫のまま時間切れでも、結果は脱出/戦死のときのもの
   pres({ gh: 0 });
   state = 'over'; running = false; mouseFire = false; scoped = false; $('hint').textContent = ''; $('prog').style.opacity = 0;
@@ -1068,7 +1090,7 @@ addEventListener('mousemove', e => {
 });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === dom;
-  if (!locked && running && !lockFail) { running = false; mouseFire = false; scoped = false; showOv('一時停止', 'クリックまたはEnterで再開'); }
+  if (!locked) { mouseFire = false; scoped = false; }   // 視点ロックがはずれても止めない(対戦中に止まると他の人のじゃまになる)
 });
 document.addEventListener('pointerlockerror', () => { lockFail = true; });
 
@@ -1076,7 +1098,7 @@ document.addEventListener('pointerlockerror', () => { lockFail = true; });
 function showOv(t, p) { $('ovT').textContent = t; $('ovP').innerHTML = p; $('ov').hidden = false; }
 function reset() {
   lootN = 0; const realRand = Math.random; if (MP.seed) Math.random = mulberry(MP.seed);   // お宝・脱出地点は全員同じ乱数で作る
-  npcs.forEach(dropNPC); npcs = []; parts = [{ name: 'あなた', money: 0, status: 'in' }]; bullets.forEach(b => scene.remove(b.m)); bullets = [];
+  bosses.forEach(dropNPC); bosses = []; npcs.forEach(dropNPC); npcs = []; parts = [{ name: 'あなた', money: 0, status: 'in' }]; bullets.forEach(b => scene.remove(b.m)); bullets = [];
   loots.slice().forEach(l => scene.remove(l.m)); loots = []; shops.forEach(s => { s.stock = { med: 0, ammo: 0, val: 0 }; fillShop(s); });
   for (let L = 0; L <= 2; L++) for (let i = 0; i < 14; i++) { const [x, z] = randCell(L, true), r = Math.random(); if (r < 0.15) addLoot('ammo', 0, '', x, H * L + 0.45, z, null, L); else if (r < 0.3) addLoot('med', 0, '', x, H * L + 0.45, z, null, L); else addLoot('val', 20000 + Math.floor(Math.random() * 40) * 1000, '落とし物のバッグ', x, H * L + 0.45, z, null, L); }
   for (let i = 0; i < 40; i++) { const [x, z] = randCell(0, false); addLoot(Math.random() < 0.5 ? 'ammo' : 'val', 15000 + Math.floor(Math.random() * 30) * 1000, '車内の忘れ物', x, 0.45, z, null, 0); }
@@ -1104,11 +1126,13 @@ function reset() {
       used.push({ L: LL, x, z }); makeNPC(NAMES[i], x, H * LL, z); break;
     }
   }
+  for (let i = 0; i < 4; i++) makeBoss();
+  logEv('赤い服の敵キャラが4体、モール内をうろついている! 倒すと大金');
 }
 $('ov').onclick = e => {
   if (e && e.target && e.target.id === 'toHome') { $('ov').hidden = true; $('home').hidden = false; $('startBtn').disabled = false; $('startBtn').textContent = 'スタート'; return; }   // 結果画面→ホームへ
   initAudio(); if (state !== 'playing') reset();
-  state = 'playing'; running = true; $('ov').hidden = true;
+  state = 'playing'; running = true; $('ov').hidden = true; startBgm();
   try { const r = dom.requestPointerLock(); if (r && r.catch) r.catch(() => { lockFail = true; }); } catch (e) { lockFail = true; }
 };
 NAMES.length < NPC_N && Array.from({ length: NPC_N - NAMES.length }, (_, k) => NAMES.push(NAMES[k % 48] + (Math.floor(k / 48) + 2)));
@@ -1153,7 +1177,8 @@ function mkAvatar(peer) {
   const b = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1, 0.3), new THREE.MeshLambertMaterial({ color: c })); b.position.y = 0.75;
   const h = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), new THREE.MeshLambertMaterial({ color: 0xe8b88a })); h.position.y = 1.7;
   const m = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.18), new THREE.MeshBasicMaterial({ color: 0x35f0ff })); m.position.y = 2.2;   // 人間の目印(水色)
-  g.add(b, h, m); scene.add(g); return { g, y: 0, remote: true, peer, tg: new THREE.Vector3(), yaw: 0 };
+  const gm = new THREE.Mesh(new THREE.OctahedronGeometry(0.3), new THREE.MeshBasicMaterial({ color: 0xffe14d, depthTest: false, transparent: true })); gm.renderOrder = 999; gm.position.y = 2.6; gm.visible = false;
+  g.add(b, h, m, gm); scene.add(g); return { g, y: 0, remote: true, peer, tg: new THREE.Vector3(), yaw: 0, gm };
 }
 function mpShot(o, d, ht) { if (!MP.g) return; const q = v => Math.round(v * 10) / 10; pres({ sh: { n: ++MP.ss, a: [q(o.x), q(o.y), q(o.z)], b: [q(o.x + d.x * ht), q(o.y + d.y * ht), q(o.z + d.z * ht)] } }); }
 function mpHit(peer, dmg) { pres({ ht: { to: peer, n: ++MP.hs, d: dmg } }); }
@@ -1167,7 +1192,7 @@ function mpTick(dt) {
     const v = p.presence; if (p.isMe || v.g !== MP.g) continue; seen.add(p.peer);
     let a = MP.rem.get(p.peer); if (!a) { a = mkAvatar(p.peer); a.g.position.set(+v.x || 0, +v.y || 0, +v.z || 0); MP.rem.set(p.peer, a); }
     const L = MP.last.get(p.peer) || {}; MP.last.set(p.peer, L);
-    a.g.visible = v.st === 'play' || v.gh === 1; a.tg.set(+v.x || 0, +v.y || 0, +v.z || 0); a.yaw = +v.r || 0;
+    a.g.visible = v.st === 'play' || v.gh === 1; a.act = v.st === 'play'; a.tg.set(+v.x || 0, +v.y || 0, +v.z || 0); a.yaw = +v.r || 0;
     const part = parts.find(r => r.peer === p.peer); if (part) { part.money = +v.m || 0; part.status = v.st === 'out' ? 'out' : v.st === 'dead' ? 'dead' : 'in'; }
     if (v.sh && v.sh.n !== L.sh && Array.isArray(v.sh.a) && Array.isArray(v.sh.b)) { L.sh = v.sh.n; addBullet(new V3(...v.sh.a), new V3(...v.sh.b), 220, 'p'); sfx('eshot', v.sh.a[0], v.sh.a[2], v.sh.a[1]); }
     if (v.ht && me && v.ht.to === me.peer && v.ht.n !== L.ht && hp > 0 && gDead <= 0) { L.ht = v.ht.n; hp -= Math.min(100, +v.ht.d || 0); sfx('hurt'); showDir(+v.x || 0, +v.z || 0, false); $('dmg').style.opacity = 1; setTimeout(() => $('dmg').style.opacity = 0, 120); }   // 相手の弾が当たった
@@ -1175,7 +1200,9 @@ function mpTick(dt) {
   }
   for (const [k, a] of MP.rem) {
     if (!seen.has(k)) { scene.remove(a.g); MP.rem.delete(k); continue; }
-    a.g.position.lerp(a.tg, Math.min(1, dt * 12)); a.y = a.g.position.y; a.g.rotation.y = a.yaw;
+    const ox = a.g.position.x, oz = a.g.position.z;
+    a.g.position.lerp(a.tg, Math.min(1, dt * 12)); a.y = a.g.position.y;
+    { const dm = Math.hypot(a.g.position.x - ox, a.g.position.z - oz); if (a.g.visible && dm < 2) { a.sd = (a.sd || 0) + dm; if (a.sd > 2.4) { a.sd = 0; sfx('step', a.g.position.x, a.g.position.z, a.y); } } }   // 他の人間の足音(近くなら聞こえる) a.g.rotation.y = a.yaw;
   }
 }
 function beginMatch(roster, lead) {   // 待機おわり:同じ顔ぶれ・同じ乱数の種で始める
@@ -1213,6 +1240,39 @@ function spectate() {   // 生きているNPCや人間の視点を借りて見�
   setT('hint', '観戦中… 復活まであと' + Math.ceil(gDead) + '秒(Spaceで見る人を切りかえ)');
 }
 
+// ===== 18d. 敵キャラ(モール内を徘徊。NPCとプレイヤーを撃つ。おじゃま虫は撃たない)=====
+function makeBoss() {
+  for (let k = 0; k < 80; k++) {
+    const L = Math.floor(Math.random() * 3), [x, z] = randCell(L, true);
+    if (lvOf(pl.y) === L && Math.hypot(x - pl.x, z - pl.z) < 35) continue;
+    const b = makeNPC('敵キャラ', x, H * L, z); npcs.pop(); parts.pop();   // NPCの数・順位には入れない
+    b.boss = true; b.hp = 120; b.money = 800000; b.ammo = 9999;
+    b.g.traverse(m => { if (m.isMesh && m !== b.head && m !== b.fl && m.material && m.material.color) { m.material = m.material.clone(); m.material.color.set(0xb01818); } });   // 赤い服
+    const mk = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 0.25), new THREE.MeshBasicMaterial({ color: 0xff2020 })); mk.position.y = 2.25; b.g.add(mk);
+    bosses.push(b); return;
+  }
+}
+function updateBoss(b, dt) {
+  const p = b.g.position; b.L = lvOf(b.y); b.fcd -= dt; let sp = 0;
+  { const cv = conv(p.x, p.z, b.y); if (cv) mv(b, cv[0] * dt, cv[1] * dt); }
+  if ((b.scan -= dt) <= 0) {   // 見える相手のうち一番近い人を狙う(おじゃま虫・観戦中の人は対象外)
+    b.scan = 0.3; b.tgt = null; let bd = 99;
+    for (const c of hp > 0 && !ghost ? [pl, ...npcs] : npcs) { const d = sees(b, posOf(c)); if (d && d < bd) { bd = d; b.tgt = c; } }
+  }
+  const tg = b.tgt && (b.tgt === pl ? hp > 0 && !ghost : npcs.includes(b.tgt)) ? b.tgt : null;
+  if (tg) {
+    const q = posOf(tg), dx = q.x - p.x, dz = q.z - p.z, d = Math.hypot(dx, dz) || 1; b.path = null;
+    b.g.rotation.y = turn(b.g.rotation.y, Math.atan2(dx, dz), 8 * dt);
+    if (d > 12) { sp = 3.2; mv(b, dx / d * sp * dt, dz / d * sp * dt); } else if (d < 6) { sp = 2; mv(b, -dx / d * sp * dt, -dz / d * sp * dt); }
+    if (b.fcd <= 0 && d < 34) { fire(b, tg, q, 0.5 + d * 0.03); b.fcd = 0.9; }
+  } else if (b.path && b.pi < b.path.length) sp = followPath(b, dt, 2.4);
+  else if ((b.dec -= dt) <= 0) { b.dec = 1 + Math.random() * 2; const L = Math.random() < 0.25 ? Math.floor(Math.random() * 3) : b.L, [x, z] = randCell(L, true); route(b, x, z, L); }
+  if ((b.flash -= dt) <= 0) b.fl.visible = false;
+  b.g.visible = Math.abs(p.x - cam.position.x) + Math.abs(p.z - cam.position.z) < 130; if (!b.g.visible) return;
+  b.ph += sp * dt * 3.2; const sw = sp ? Math.sin(b.ph) * 0.8 : 0; b.lL.rotation.x = sw; b.lR.rotation.x = -sw; b.aL.rotation.x = -sw * 0.8;
+  b.aR.rotation.x = tg ? -1.45 : -0.3 + sw * 0.8;
+}
+
 // ===== 19. 毎フレームの更新 =====
 function update(dt) {
   t += dt; fireCd -= dt; dirT -= dt; routeBudget = 2;
@@ -1223,6 +1283,7 @@ function update(dt) {
   nearLoot = ghost ? null : near; setT('hint', elevNear() ? 'エレベーター  E:上の階へ  Q:下の階へ' : nearLoot ? 'E:拾う  ' + near.name : '');
   if (!ghost && EXT.some(z => Math.hypot(pl.x - z.x, pl.z - z.z) < 3 && Math.abs(pl.y - H * z.L) < 2.5)) { exT += dt; setS('prog', 'opacity', 1); $('prog').firstChild.style.width = Math.min(100, exT / 6 * 100) + '%'; setT('hint', '脱出中… 動かずに待て'); if (exT >= 6) return goGhost('out'); } else { exT = 0; setS('prog', 'opacity', 0); }
   if (raidT <= 0) return endRaid('mia');
+  if (myRes && npcs.length === 0 && ![...MP.rem.values()].some(a => a.act)) return endRaid();   // 残っているのが敵キャラとおじゃま虫だけなら終了
   if (gDead > 0) { gDead -= dt; spectate(); if (gDead <= 0) ghostBack(); } else {
   if (ghost) { wpn = 0; mag = 30; reserve = 60; reloadT = 0; scoped = false; }   // おじゃま虫:ハンドガンのみ・弾は無限(クールタイムあり)
   let mx = ((keys.KeyD || keys.ArrowRight) ? 1 : 0) - ((keys.KeyA || keys.ArrowLeft) ? 1 : 0), mz = ((keys.KeyS || keys.ArrowDown) ? 1 : 0) - ((keys.KeyW || keys.ArrowUp) ? 1 : 0);
@@ -1244,14 +1305,23 @@ function update(dt) {
   recoil *= 0.85; gun.position.z = (wpn ? -0.8 : -0.55) + recoil; gun.visible = !scoped;
   { const fv = scoped ? 16 : 75; if (cam.fov !== fv) { cam.fov = fv; cam.updateProjectionMatrix(); } setS('scope', 'display', scoped ? 'block' : 'none'); setS('cross', 'display', scoped ? 'none' : 'block'); }
   }
-  npcs.forEach(e => { e.fcd -= dt; updateNPC(e, dt); }); updateBullets(dt); mpTick(dt);
+  npcs.forEach(e => { e.fcd -= dt; updateNPC(e, dt); }); bosses.forEach(b => updateBoss(b, dt)); updateBullets(dt); mpTick(dt);
   npcs = npcs.filter(e => {   // 倒されたNPC:持ち物(お金・弾・救急キット)をすべて落とす
     if (e.hp <= 0 && !e.left) { e.dead = true; dropNPC(e); e.rec.status = 'dead'; logEv(e.rec.name + ' が戦死'); dropAll(e.g.position.x, e.y, e.g.position.z, e.money, e.ammo, e.meds); }
     return e.hp > 0;
   });
+  bosses = bosses.filter(b => {   // 倒された敵キャラ:大金のバッグを落とす
+    if (b.hp > 0) return true;
+    b.dead = true; dropNPC(b); logEv('敵キャラが倒された!'); dropAll(b.g.position.x, b.y, b.g.position.z, b.money, 60, 1); return false;
+  });
   setS('hp', 'width', Math.max(0, hp) + '%');
   setT('items', (wpn ? 'スナイパー ' + sMag + ' / ' + sReserve : '弾 ' + mag + ' / ' + reserve) + (reloadT > 0 ? '(リロード中)' : fireCd > 0 ? '(次弾まで ' + fireCd.toFixed(1) + '秒)' : '') + '   救急 ' + meds + '   ¥' + lootVal.toLocaleString());
   if ($('dirp').style.display === 'block' && dirT <= 0) { showStock(); dirT = 0.5; }
+  { let nd2 = 1e9; const cx = cam.position.x, cz = cam.position.z, cy = cam.position.y;   // おじゃま虫:近く(50m)にいる人(NPC・人間)を壁越しに黄色い目印で教える
+    const mark = (m, x, z, y) => { const d = Math.hypot(x - cx, z - cz), on = ghost && d < 50 && Math.abs(y - cy) < 20; m.visible = on; if (on && d < nd2) nd2 = d; };
+    for (const e of npcs) mark(e.mk, e.g.position.x, e.g.position.z, e.y);
+    for (const a of MP.rem.values()) mark(a.gm, a.g.position.x, a.g.position.z, a.y);
+    if (ghost && gDead <= 0 && nd2 < 1e9 && !elevNear()) setT('hint', '近くに人がいる(黄色い◆は壁越しでも見える)最短 ' + Math.round(nd2) + 'm'); }
   if (ghost) setT('items', 'おじゃま虫(弾∞)' + (fireCd > 0 && gDead <= 0 ? ' 次弾まで ' + fireCd.toFixed(1) + '秒' : '') + (gDead > 0 ? '  復活まで ' + Math.ceil(gDead) + '秒' : ''));
   if (hp <= 0 && gDead <= 0) { if (myRes) ghostDown(); else goGhost('dead'); }
 }
@@ -1267,6 +1337,10 @@ let last = performance.now(), frame = 0;
   }
   requestAnimationFrame(loop);
 })(last);
+// 別のタブを見ている間もゲームを進める(ブラウザは裏のタブの描画を止めるので、時間だけ進める)
+let bgLast = performance.now();
+setInterval(() => { const n = performance.now(); if (document.hidden && running) { for (let el = Math.min(5, (n - bgLast) / 1000); el > 0 && running; el -= 0.05) update(0.05); } bgLast = n; }, 250);
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseFire = false; });   // キーが押しっぱなしになるのを防ぐ
 </script>
 </body>
 </html>
