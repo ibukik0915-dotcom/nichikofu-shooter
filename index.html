@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ニチコフ風 脱出シューター(大型モール版)</title>
+<title>強盗チャンピオンズ</title>
 <style>
 :root{--bg:#cfe3f2;--fg:#14233a;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10203a;--fg:#eef4ff}}
@@ -69,7 +69,7 @@ canvas{display:block}
   <div id="hpbox"><div id="hpbar"><div id="hp"></div></div></div>
 </div>
 <div id="ov" hidden><h1 id="ovT"></h1><p id="ovP"></p></div>
-<div id="home"><h1 id="homeT"></h1><p id="homeP"></p><div class="keys">矢印キー/WASD 移動 ・ Shift 走る ・ Space ジャンプ(スコープ中は発射)<br>クリック/Enter 撃つ ・ R リロード ・ E 拾う ・ K 武器切替<br>右クリック長押し スコープ(スナイパー) ・ H 救急キット ・ Tab 店舗の在庫 ・ X 全体マップ</div><button id="startBtn">スタート</button></div>
+<div id="home"><h1 id="homeT"></h1><button id="startBtn">スタート</button></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -1137,7 +1137,7 @@ $('ov').onclick = e => {
 };
 NAMES.length < NPC_N && Array.from({ length: NPC_N - NAMES.length }, (_, k) => NAMES.push(NAMES[k % 48] + (Math.floor(k / 48) + 2)));
 $('ov').hidden = true;   // 最初に出すのはホーム画面(#home)。#ov は一時停止・結果の表示用
-$('homeT').textContent = 'ニチコフ風 脱出シューター(大型モール版)'; $('homeP').innerHTML = '<b>オンライン対戦:</b>スタートを押すと15秒待機します。同じリンクを開いてその間にスタートを押した人は同じステージで遊べて、足りない人数はNPCで<b>合計20人</b>になります。<br><b>目的は資金調達。</b>モール(西館・東館・北館、3階建て+屋上)に落ちているお宝(お金)を集めて、脱出地点から脱出しよう。持ち帰った金額が成績です。<br>相手(NPC)は<b>状況を見て判断します</b>。勝てそうなら攻撃し、無理だと思えば逃げます。弱っていると狙われ、同じ敵を狙う者どうしは協力します。撃たれた経験があると、その相手を怖がります。追いつめられると反撃し、度胸のある者は銃声の様子を見に来ることも。静かに動くのがコツ。<br>通路の裏は業務用通路(灰色の床)でつながっています。Xキーで全体マップ、Tabでお店の在庫。<br>お店の棚や通路のお宝を集めて、<b>ランダムに開く2か所の脱出地点(ミニマップの緑の点)</b>から脱出しよう。自然回復はありません。倒れると持ち物をすべて落とします。<br><b>Kキーで武器切替</b>:スナイパー(弾倉3発・クールタイム3秒・頭に当てれば即死・右クリック長押しでスコープ)。スナイパー弾(1個で3発)はモール内にランダムに落ちています。';
+$('homeT').textContent = '強盗チャンピオンズ';
 
 // ===== 18b. オンライン対戦(同じリンクを開いている人どうし)=====
 // スタートを押すと15秒待つ。その間に押した人は同じステージ(同じお宝・脱出地点)で対戦し、足りない人数はNPCで20人ぴったりにする。
